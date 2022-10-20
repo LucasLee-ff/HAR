@@ -24,6 +24,7 @@ class DarkVid(Dataset):
         vid_path = os.path.join(self.root, self.mode, self.vid_list[idx])
         buffer = self.load_video(vid_path)
         buffer = self.sample_video(buffer)
+        buffer = buffer / 255.0
         buffer = self.normalize(buffer)
         buffer = buffer.transpose((3, 0, 1, 2))  # (T, H, W, C) -> (C, T, H, W)
         buffer = torch.from_numpy(buffer)

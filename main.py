@@ -19,7 +19,11 @@ def main(args):
 
     model_name = 'r3d'
     model = Net(model_name=model_name, num_classes=10)
-    model.load_pretrained('./models/pth_from_pytorch/r3d_18-b3b3357e.pth')
+    if args.pretrained:
+        pretrained_path = args.pretrained
+    else:
+        pretrained_path = './models/pth_from_pytorch/r3d_18-b3b3357e.pth'
+    model.load_pretrained(pretrained_path)
     #model.load_pretrained('./models/pth_from_pytorch/r2plus1d_18-91a641e6.pth')
     model.cuda()
 
@@ -63,7 +67,7 @@ def main(args):
         checkpoint = './ckpts/'
     if not os.path.isdir(writer_path):
         os.makedirs(writer_path)
-    
+
     accumulation_step = args.accumulation_step
     for epoch in range(args.start_epoch, args.epochs):
         train_loss, train_acc = train(model, train_loader, criterion, optimizer, epoch, accumulation_step)
@@ -179,5 +183,7 @@ if __name__ == '__main__':
                         help='manual epoch number (useful on restarts)')
     parser.add_argument('--accumulation-step', default=1, type=int, metavar='N',
                         help='')
+    parser.add_argument('--pretrained', default='./drive/MyDrive/r3d_18-b3b3357e.pth', type=str, metavar='PATH',
+                        help='path of pretrained model')
     args = parser.parse_args()
     main(args)

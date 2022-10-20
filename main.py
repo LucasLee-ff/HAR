@@ -17,7 +17,7 @@ def main(args):
     torch.cuda.manual_seed(2022)
     np.random.seed(2022)
 
-    model_name = 'r3d'
+    model_name = args.model
     model = Net(model_name=model_name, num_classes=10)
     if args.pretrained:
         pretrained_path = args.pretrained
@@ -33,9 +33,9 @@ def main(args):
     classifier_params = []
     for param, val in model.named_parameters():
         if 'fc' in param:
-            classifier_params.append(param)
+            classifier_params.append(val)
         else:
-            base_params.append(param)
+            base_params.append(val)
     params = [{'params': base_params, 'lr_mult': 0.1}, {'params': classifier_params, 'lr_mult': 1}]
     assert args.optim == 'adam' or args.optim == 'sgd', 'no such optimizer option'
     if args.optim == 'adam':
@@ -172,6 +172,7 @@ def test(model, test_loader, criterion):
         pbar.set_description('Validating')
     loss_avg = loss_sum / n
     preds = torch.cat(preds).cpu()
+    targets = torch.cat(targets).cpu()
     top1 = top_k_accuracy_score(targets, preds, k=1)
     top5 = top_k_accuracy_score(targets, preds, k=5)
     return loss_avg, top1, top5
@@ -179,6 +180,9 @@ def test(model, test_loader, criterion):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
+    parser.add_argument('--model', default='r3d', type=str,
+                        help='optimizer')
+
     # basic
     parser.add_argument('--epochs', default=100, type=int, metavar='N',
                         help='number of total epochs to train')
@@ -190,7 +194,7 @@ if __name__ == '__main__':
                         help="batch size")
     # optimizer
     parser.add_argument('--optim', default='adam', type=str,
-                        help='path to latest checkpoint (default: none)')
+                        help='optimizer')
     parser.add_argument("--lr", default=1e-3, type=float,
                         metavar='LR', help='initial learning rate')
     parser.add_argument("--wd", type=float, default=1e-4,

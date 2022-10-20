@@ -36,6 +36,7 @@ class DarkVid(Dataset):
         return len(self.label_list)
 
     def load_video(self, path):
+        # Load all frames of the video
         vid = cv2.VideoCapture(path)
         total_frames = int(vid.get(cv2.CAP_PROP_FRAME_COUNT))
         height = int(vid.get(cv2.CAP_PROP_FRAME_HEIGHT))
@@ -50,42 +51,22 @@ class DarkVid(Dataset):
             buffer[count] = frame
             count += 1
         vid.release()
-        return buffer
+        # downsample the video along the temporal axis by step=2
+        return buffer[::2, :, :, :]
 
     def sample_video(self, buffer):
-        #vid = cv2.VideoCapture(path)
-        #total_frames = int(vid.get(cv2.CAP_PROP_FRAME_COUNT))
-        #start_idx, end_idx, clip_len = 0, total_frames - 1, total_frames
-        new_buffer = buffer[::2, :, :, :]
-        length = len(new_buffer)
+        length = len(buffer)
 
+        # get clip_len=16 consecutive frames start from a randomly selected index
         start_idx = np.random.randint(0, length - self.clip_len + 1)
-        return new_buffer[start_idx:start_idx + 16, :, :, :]
-        #end_idx = start_idx + self.clip_len - 1
-        #clip_len = self.clip_len
-        '''
-        buffer = np.empty((clip_len, self.height, self.width, 3), np.dtype('float32'))
-        curr = 0
-        count = 0
-        while curr <= end_idx:
-            ret, frame = vid.read()
-            if not ret:
-                break
-            if curr >= start_idx:
-                frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                #frame = cv2.resize(frame, (self.width, self.height))
-                #frame = cv2.normalize(frame, None, 0, 255, cv2.NORM_MINMAX)
-                #frame = frame.astype('float32') / 255
-                buffer[count] = frame
-                count += 1
-            curr += 1
-        vid.release()
-        return buffer
-        '''
+        try:
+            return buffer[start_idx:start_idx + self.clip_len, :, :, :]
+        except:
+            print("clip_len too large!")
+            exit(0)
 
     def normalize(self, buffer):
-        # Normalize the buffer
-        # buffer = (buffer - 128)/128.0
+        # Normalize every frame using "mean" and "standard deviation from ARID dataset"
         for i, frame in enumerate(buffer):
             frame = (frame - np.array([[[0.079612, 0.073888, 0.072454]]])) / np.array([[[0.100459, 0.0970497, 0.089911]]])
             buffer[i] = frame

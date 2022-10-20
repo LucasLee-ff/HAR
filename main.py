@@ -35,7 +35,10 @@ def main(args):
     train_loader = DataLoader(DarkVid('./data', mode='train', transform=train_transforms), batch_size=args.batch, shuffle=True)
     valid_loader = DataLoader(DarkVid('./data', mode='validate', transform=validation_transforms), batch_size=args.batch)
 
-    writer_path = './log_' + model_name + '/'
+    if args.writer:
+        writer_path = args.writer
+    else:
+        writer_path = './log/'
     if not os.path.isdir(writer_path):
         os.makedirs(writer_path)
     settings = 'LR{:.4f}_B{:d}'.format(args.lr, args.batch)
@@ -54,19 +57,26 @@ def main(args):
         best_acc = 0
         print("=> no checkpoint found")
 
-    checkpoints = './ckpts/'
+    if args.checkpoint:
+        checkpoint = args.checkpoint
+    else:
+        checkpoint = './ckpts/'
+    if not os.path.isdir(writer_path):
+        os.makedirs(writer_path)
+    
+    accumulation_step = args.accumulation_step
     for epoch in range(args.start_epoch, args.epochs):
-        train_loss, train_acc = train(model, train_loader, criterion, optimizer, epoch)
+        train_loss, train_acc = train(model, train_loader, criterion, optimizer, epoch, accumulation_step)
         valid_loss, valid_acc = test(model, valid_loader, criterion)
         scheduler.step()
 
-        file_name_last = os.path.join(checkpoints, 'model_epoch_%d.pth' % (epoch + 1,))
-        file_name_former = os.path.join(checkpoints, 'model_epoch_%d.pth' % epoch)
+        file_name_last = os.path.join(checkpoint, 'model_epoch_%d.pth' % (epoch + 1,))
+        file_name_former = os.path.join(checkpoint, 'model_epoch_%d.pth' % epoch)
 
         if valid_acc > best_acc:
             best_acc = valid_acc
-            if os.path.isfile(checkpoints + 'best_model.pth'):
-                os.remove(checkpoints + 'best_model.pth')
+            if os.path.isfile(checkpoint + 'best_model.pth'):
+                os.remove(checkpoint + 'best_model.pth')
             #torch.save({'state_dict': model.state_dict(), 'epoch': epoch}, checkpoints + 'best_model.pth')
             torch.save({
                 'epoch': epoch + 1,
@@ -74,7 +84,7 @@ def main(args):
                 'optim_dict': optimizer.state_dict(),
                 'scheduler_dict': scheduler.state_dict(),
                 'best_acc': best_acc
-            }, checkpoints + 'best_model.pth')
+            }, checkpoint + 'best_model.pth')
 
         # save the latest model
         torch.save({
@@ -93,7 +103,7 @@ def main(args):
         writer.add_scalars('Acc', {'train': train_acc, 'validation': valid_acc}, epoch + 1)
 
 
-def train(model, train_loader, criterion, optimizer, epoch, accumulation_steps=3):
+def train(model, train_loader, criterion, optimizer, epoch, accumulation_steps=1):
     model.train()
     loss_sum, n = 0, 0
     preds, targets = [], []
@@ -161,7 +171,13 @@ if __name__ == '__main__':
                         help='momentum')
     parser.add_argument('--resume', default='', type=str, metavar='PATH',
                         help='path to latest checkpoint (default: none)')
+    parser.add_argument('--writer', default='./drive/MyDrive/log/', type=str, metavar='PATH',
+                        help='path of summarywriter')
+    parser.add_argument('--checkpoint', default='./drive/MyDrive/ckpts/', type=str, metavar='PATH',
+                        help='path to save model')
     parser.add_argument('--start-epoch', default=0, type=int, metavar='N',
                         help='manual epoch number (useful on restarts)')
+    parser.add_argument('--accumulation-step', default=1, type=int, metavar='N',
+                        help='')
     args = parser.parse_args()
     main(args)

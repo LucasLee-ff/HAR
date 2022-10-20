@@ -52,7 +52,10 @@ class DarkVid(Dataset):
             count += 1
         vid.release()
         # downsample the video along the temporal axis by step=2
-        return buffer[::2, :, :, :]
+        if np.random.random() < 0.5:
+            return buffer[::2, :, :, :]
+        else:
+            return buffer[1::2, :, :, :]
 
     def sample_video(self, buffer):
         length = len(buffer)

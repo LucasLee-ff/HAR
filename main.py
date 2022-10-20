@@ -3,7 +3,7 @@ import torch.nn as nn
 from dataset import DarkVid
 from torch.utils.data import DataLoader
 from tqdm import tqdm
-from sklearn.metrics import accuracy_score, top_k_accuracy_score
+from sklearn.metrics import top_k_accuracy_score
 from torch.utils.tensorboard import SummaryWriter
 import numpy as np
 import os
@@ -28,7 +28,20 @@ def main(args):
     model.cuda()
 
     criterion = nn.CrossEntropyLoss().cuda()
-    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.wd)
+
+    base_params = []
+    classifier_params = []
+    for param, val in model.named_parameters():
+        if 'fc' in param:
+            classifier_params.append(param)
+        else:
+            base_params.append(param)
+    params = [{'params': base_params, 'lr_mult': 0.1}, {'params': classifier_params, 'lr_mult': 1}]
+    assert args.optim == 'adam' or args.optim == 'sgd', 'no such optimizer option'
+    if args.optim == 'adam':
+        optimizer = torch.optim.Adam(params, lr=args.lr, weight_decay=args.wd)
+    elif args.optim == 'sgd':
+        optimizer = torch.optim.SGD(params, lr=args.lr, weight_decay=args.wd)
     scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, [10, 30, 70])
 
     train_transforms = nn.Sequential(
@@ -37,12 +50,12 @@ def main(args):
     )
     validation_transforms = CenterCrop((224, 224))
     train_loader = DataLoader(DarkVid('./data', mode='train', transform=train_transforms), batch_size=args.batch, shuffle=True)
-    valid_loader = DataLoader(DarkVid('./data', mode='validate', transform=validation_transforms), batch_size=args.batch)
+    valid_loader = DataLoader(DarkVid('./data', mode='validate', transform=validation_transforms), batch_size=args.val_batch)
 
     if args.writer:
         writer_path = args.writer
     else:
-        writer_path = './log/'
+        writer_path = './log' + model_name + '/'
     if not os.path.isdir(writer_path):
         os.makedirs(writer_path)
     settings = 'LR{:.4f}_B{:d}'.format(args.lr, args.batch)
@@ -166,29 +179,35 @@ def test(model, test_loader, criterion):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
+    # basic
     parser.add_argument('--epochs', default=100, type=int, metavar='N',
                         help='number of total epochs to train')
+    parser.add_argument('--start-epoch', default=0, type=int, metavar='N',
+                        help='manual epoch number (useful on restarts)')
     parser.add_argument("--batch", type=int, default=5,
                         help="batch size")
+    parser.add_argument("--val-batch", type=int, default=6,
+                        help="batch size")
+    # optimizer
+    parser.add_argument('--optim', default='adam', type=str,
+                        help='path to latest checkpoint (default: none)')
     parser.add_argument("--lr", default=1e-3, type=float,
                         metavar='LR', help='initial learning rate')
     parser.add_argument("--wd", type=float, default=1e-4,
                         help="weight decay")
-    parser.add_argument("--test_interval", type=int, default=1,
-                        help="By training how many epochs to conduct testing once")
     parser.add_argument('--momentum', default=0.9, type=float, metavar='M',
                         help='momentum')
-    parser.add_argument('--resume', default='', type=str, metavar='PATH',
-                        help='path to latest checkpoint (default: none)')
-    parser.add_argument('--writer', default='./drive/MyDrive/log/', type=str, metavar='PATH',
-                        help='path of summarywriter')
-    parser.add_argument('--checkpoint', default='./drive/MyDrive/ckpts/', type=str, metavar='PATH',
-                        help='path to save model')
-    parser.add_argument('--start-epoch', default=0, type=int, metavar='N',
-                        help='manual epoch number (useful on restarts)')
     parser.add_argument('--accumulation-step', default=1, type=int, metavar='N',
                         help='')
-    parser.add_argument('--pretrained', default='./drive/MyDrive/r3d_18-b3b3357e.pth', type=str, metavar='PATH',
+
+    # path
+    parser.add_argument('--resume', default='', type=str, metavar='PATH',
+                        help='path to latest checkpoint (default: none)')
+    parser.add_argument('--writer', default='', type=str, metavar='PATH',
+                        help='path of SummaryWriter')
+    parser.add_argument('--checkpoint', default='', type=str, metavar='PATH',
+                        help='path to save model')
+    parser.add_argument('--pretrained', default='', type=str, metavar='PATH',
                         help='path of pretrained model')
     args = parser.parse_args()
     main(args)

@@ -3,7 +3,7 @@ import torch.nn as nn
 from dataset import DarkVid
 from torch.utils.data import DataLoader
 from tqdm import tqdm
-from sklearn.metrics import accuracy_score
+from sklearn.metrics import accuracy_score, top_k_accuracy_score
 from torch.utils.tensorboard import SummaryWriter
 import numpy as np
 import os
@@ -70,15 +70,15 @@ def main(args):
 
     accumulation_step = args.accumulation_step
     for epoch in range(args.start_epoch, args.epochs):
-        train_loss, train_acc = train(model, train_loader, criterion, optimizer, epoch, accumulation_step)
-        valid_loss, valid_acc = test(model, valid_loader, criterion)
+        train_loss, train_top1, train_top5 = train(model, train_loader, criterion, optimizer, epoch, accumulation_step)
+        valid_loss, valid_top1, valid_top5 = test(model, valid_loader, criterion)
         scheduler.step()
 
         file_name_last = os.path.join(checkpoint, 'model_epoch_%d.pth' % (epoch + 1,))
         file_name_former = os.path.join(checkpoint, 'model_epoch_%d.pth' % epoch)
 
-        if valid_acc > best_acc:
-            best_acc = valid_acc
+        if valid_top1 > best_acc:
+            best_acc = valid_top1
             if os.path.isfile(checkpoint + 'best_model.pth'):
                 os.remove(checkpoint + 'best_model.pth')
             #torch.save({'state_dict': model.state_dict(), 'epoch': epoch}, checkpoints + 'best_model.pth')
@@ -104,7 +104,8 @@ def main(args):
             os.remove(file_name_former)
 
         writer.add_scalars('Loss', {'train': train_loss, 'validation': valid_loss}, epoch + 1)
-        writer.add_scalars('Acc', {'train': train_acc, 'validation': valid_acc}, epoch + 1)
+        writer.add_scalars('Top1', {'train': train_top1, 'validation': valid_top1}, epoch + 1)
+        writer.add_scalars('Top5', {'train': train_top5, 'validation': valid_top5}, epoch + 1)
 
 
 def train(model, train_loader, criterion, optimizer, epoch, accumulation_steps=1):
@@ -118,8 +119,10 @@ def train(model, train_loader, criterion, optimizer, epoch, accumulation_steps=1
         target = target.cuda()
 
         output = model(input)
-        preds.append(torch.argmax(output, dim=1))
+        preds.append(output.detach())
+        #preds.append(torch.argmax(output, dim=1))
         targets.append(target)
+
         loss = criterion(output, target)
         loss_sum += loss.detach()
         loss = loss / accumulation_steps
@@ -132,8 +135,9 @@ def train(model, train_loader, criterion, optimizer, epoch, accumulation_steps=1
     loss_avg = loss_sum / n
     preds = torch.cat(preds).cpu()
     targets = torch.cat(targets).cpu()
-    acc = accuracy_score(targets, preds)
-    return loss_avg, acc
+    top1 = top_k_accuracy_score(targets, preds, k=1)
+    top5 = top_k_accuracy_score(targets, preds, k=5)
+    return loss_avg, top1, top5
 
 
 def test(model, test_loader, criterion):
@@ -147,16 +151,17 @@ def test(model, test_loader, criterion):
         target = target.cuda()
         with torch.no_grad():
             output = model(input)
-            preds.append(torch.argmax(output, dim=1))
+            preds.append(output.detach())
+            #preds.append(torch.argmax(output, dim=1))
             targets.append(target)
             loss = criterion(output, target)
             loss_sum += loss.detach()
         pbar.set_description('Validating')
     loss_avg = loss_sum / n
     preds = torch.cat(preds).cpu()
-    targets = torch.cat(targets).cpu()
-    acc = accuracy_score(targets, preds)
-    return loss_avg, acc
+    top1 = top_k_accuracy_score(targets, preds, k=1)
+    top5 = top_k_accuracy_score(targets, preds, k=5)
+    return loss_avg, top1, top5
 
 
 if __name__ == '__main__':

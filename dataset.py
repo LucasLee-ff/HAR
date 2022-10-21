@@ -23,7 +23,11 @@ class DarkVid(Dataset):
     def __getitem__(self, idx):
         vid_path = os.path.join(self.root, self.mode, self.vid_list[idx])
         buffer = self.load_video(vid_path)
-        buffer = self.sample_video(buffer)
+        buffer = self.downsample(buffer)
+        if self.mode == 'train':
+            buffer = self.random_sample(buffer)
+        else:
+            buffer = self.center_sample(buffer)
         buffer = buffer / 255.0
         buffer = self.normalize(buffer)
         buffer = buffer.transpose((3, 0, 1, 2))  # (T, H, W, C) -> (C, T, H, W)
@@ -51,22 +55,32 @@ class DarkVid(Dataset):
             buffer[count] = frame
             count += 1
         vid.release()
-        # downsample the video along the temporal axis by step=2
-        if np.random.random() < 0.5:
-            return buffer[::2, :, :, :]
-        else:
-            return buffer[1::2, :, :, :]
+        return buffer
 
-    def sample_video(self, buffer):
-        length = len(buffer)
+    def downsample(self, buffer, interval=2):
+        # downsample the video along the temporal axis with step=interval
+        if self.mode == 'train':
+            if np.random.random() < 0.5:
+                return buffer[1::interval, :, :, :]
+        return buffer[::interval, :, :, :]
 
+    def random_sample(self, buffer):
         # get clip_len=16 consecutive frames start from a randomly selected index
+        length = len(buffer)
         start_idx = np.random.randint(0, length - self.clip_len + 1)
         try:
             return buffer[start_idx:start_idx + self.clip_len, :, :, :]
         except:
-            print("clip_len too large!")
-            exit(0)
+            raise Exception("clip_len too large!")
+
+    def center_sample(self, buffer):
+        length = len(buffer)
+        center_idx = length // 2
+        offset = self.clip_len // 2
+        try:
+            return buffer[center_idx - offset:center_idx + offset, :, :, :]
+        except:
+            raise Exception("clip_len too large!")
 
     def normalize(self, buffer):
         # Normalize every frame using "mean" and "standard deviation from ARID dataset"

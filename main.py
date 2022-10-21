@@ -8,7 +8,7 @@ from torch.utils.tensorboard import SummaryWriter
 import numpy as np
 import os
 import argparse
-from models.net import Net
+from models.net import Net, SlowFast
 from torchvision.transforms import RandomHorizontalFlip, RandomCrop, CenterCrop
 
 
@@ -18,25 +18,34 @@ def main(args):
     np.random.seed(2022)
 
     model_name = args.model
-    model = Net(model_name=model_name, num_classes=10)
+
+    if model_name.lower() == 'slowfast':
+        isSlowfast = True
+        model = SlowFast(num_classes=10)
+        clip_len = 32
+        classifier_keyword = 'proj'
+    else:
+        isSlowfast = False
+        model = Net(model_name=model_name, num_classes=10)
+        clip_len = 16
+        classifier_keyword = 'fc'
+
     if args.pretrained:
         pretrained_path = args.pretrained
-    else:
-        pretrained_path = './models/pth_from_pytorch/r3d_18-b3b3357e.pth'
-    model.load_pretrained(pretrained_path)
-    #model.load_pretrained('./models/pth_from_pytorch/r2plus1d_18-91a641e6.pth')
-    model.cuda()
+        model.load_pretrained(pretrained_path)
+    model = model.cuda()
 
     criterion = nn.CrossEntropyLoss().cuda()
 
     base_params = []
     classifier_params = []
+
     for param, val in model.named_parameters():
-        if 'fc' in param:
+        if classifier_keyword in param:
             classifier_params.append(val)
         else:
             base_params.append(val)
-    params = [{'params': base_params, 'lr_mult': 0.1}, {'params': classifier_params, 'lr_mult': 1}]
+    params = [{'params': base_params, 'lr_mult': 1}, {'params': classifier_params, 'lr_mult': 1}]
     assert args.optim == 'adam' or args.optim == 'sgd', 'no such optimizer option'
     if args.optim == 'adam':
         optimizer = torch.optim.Adam(params, lr=args.lr, weight_decay=args.wd)
@@ -49,8 +58,11 @@ def main(args):
         RandomCrop((224, 224))
     )
     validation_transforms = CenterCrop((224, 224))
-    train_loader = DataLoader(DarkVid('./data', mode='train', transform=train_transforms), batch_size=args.batch, shuffle=True)
-    valid_loader = DataLoader(DarkVid('./data', mode='validate', transform=validation_transforms), batch_size=args.val_batch)
+
+    train_loader = DataLoader(DarkVid('./data', mode='train', clip_len=clip_len, transform=train_transforms),
+                              batch_size=args.batch, shuffle=True)
+    valid_loader = DataLoader(DarkVid('./data', mode='validate', clip_len=clip_len, transform=validation_transforms),
+                              batch_size=args.val_batch)
 
     if args.writer:
         writer_path = args.writer
@@ -77,14 +89,14 @@ def main(args):
     if args.checkpoint:
         checkpoint = args.checkpoint
     else:
-        checkpoint = './ckpts/'
-    if not os.path.isdir(writer_path):
-        os.makedirs(writer_path)
+        checkpoint = './ckpts/' + model_name + '/'
+    if not os.path.isdir(checkpoint):
+        os.makedirs(checkpoint)
 
     accumulation_step = args.accumulation_step
     for epoch in range(args.start_epoch, args.epochs):
-        train_loss, train_top1, train_top5 = train(model, train_loader, criterion, optimizer, epoch, accumulation_step)
-        valid_loss, valid_top1, valid_top5 = test(model, valid_loader, criterion)
+        train_loss, train_top1, train_top5 = train(model, train_loader, criterion, optimizer, epoch, isSlowfast, accumulation_step)
+        valid_loss, valid_top1, valid_top5 = test(model, valid_loader, criterion, isSlowfast)
         scheduler.step()
 
         file_name_last = os.path.join(checkpoint, 'model_epoch_%d.pth' % (epoch + 1,))
@@ -121,19 +133,21 @@ def main(args):
         writer.add_scalars('Top5', {'train': train_top5, 'validation': valid_top5}, epoch + 1)
 
 
-def train(model, train_loader, criterion, optimizer, epoch, accumulation_steps=1):
+def train(model, train_loader, criterion, optimizer, epoch, isSlowfast, accumulation_steps=1):
     model.train()
     loss_sum, n = 0, 0
     preds, targets = [], []
     pbar = tqdm(enumerate(train_loader), total=len(train_loader))
-    for i, (input, target) in pbar:
+    for i, (inputs, target) in pbar:
         n += 1
-        input = input.cuda()
+        inputs = inputs.cuda()
         target = target.cuda()
-
-        output = model(input)
+        if isSlowfast:
+            inputs_var = [inputs[:, :, ::4, :, :], inputs]
+        else:
+            inputs_var = inputs
+        output = model(inputs_var)
         preds.append(output.detach())
-        #preds.append(torch.argmax(output, dim=1))
         targets.append(target)
 
         loss = criterion(output, target)
@@ -153,19 +167,22 @@ def train(model, train_loader, criterion, optimizer, epoch, accumulation_steps=1
     return loss_avg, top1, top5
 
 
-def test(model, test_loader, criterion):
+def test(model, test_loader, criterion, isSlowfast):
     model.eval()
     loss_sum, n = 0, 0
     preds, targets = [], []
     pbar = tqdm(enumerate(test_loader), total=len(test_loader))
-    for i, (input, target) in pbar:
+    for i, (inputs, target) in pbar:
         n += 1
-        input = input.cuda()
+        inputs = inputs.cuda()
         target = target.cuda()
+        if isSlowfast:
+            inputs_var = [inputs[:, :, ::4, :, :], inputs]
+        else:
+            inputs_var = inputs
         with torch.no_grad():
-            output = model(input)
+            output = model(inputs_var)
             preds.append(output.detach())
-            #preds.append(torch.argmax(output, dim=1))
             targets.append(target)
             loss = criterion(output, target)
             loss_sum += loss.detach()
@@ -181,7 +198,7 @@ def test(model, test_loader, criterion):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--model', default='r3d', type=str,
-                        help='optimizer')
+                        help='model, can be slowfast, r3d, r2+1d')
 
     # basic
     parser.add_argument('--epochs', default=100, type=int, metavar='N',

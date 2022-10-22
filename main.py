@@ -194,7 +194,7 @@ def test(model, test_loader, criterion, isSlowfast):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--model', default='r3d', type=str,
-                        help='model, can be slowfast, r3d, r2+1d')
+                        help='model, can be slowfast, r3d, r2+1d, x3d')
 
     # basic
     parser.add_argument('--epochs', default=100, type=int, metavar='N',

@@ -8,7 +8,7 @@ from torch.utils.tensorboard import SummaryWriter
 import numpy as np
 import os
 import argparse
-from models.net import Net, SlowFast
+from models.net import Net
 from torchvision.transforms import RandomHorizontalFlip, RandomCrop, CenterCrop
 
 
@@ -17,18 +17,16 @@ def main(args):
     torch.cuda.manual_seed(2022)
     np.random.seed(2022)
 
-    model_name = args.model
+    model_name = args.model.lower()
+    model = Net(model_name=model_name, num_classes=10)
+    new_layers = model.new_layers
 
-    if model_name.lower() == 'slowfast':
+    if model_name == 'slowfast':
         isSlowfast = True
-        model = SlowFast(num_classes=10)
         clip_len = 32
-        classifier_keyword = 'proj'
     else:
         isSlowfast = False
-        model = Net(model_name=model_name, num_classes=10)
         clip_len = 16
-        classifier_keyword = 'fc'
 
     if args.pretrained:
         pretrained_path = args.pretrained
@@ -41,7 +39,7 @@ def main(args):
     classifier_params = []
 
     for param, val in model.named_parameters():
-        if classifier_keyword in param:
+        if param in new_layers:
             classifier_params.append(val)
         else:
             base_params.append(val)
@@ -58,7 +56,6 @@ def main(args):
         RandomCrop((224, 224))
     )
     validation_transforms = CenterCrop((224, 224))
-
     train_loader = DataLoader(DarkVid('./data', mode='train', clip_len=clip_len, transform=train_transforms),
                               batch_size=args.batch, shuffle=True)
     valid_loader = DataLoader(DarkVid('./data', mode='validate', clip_len=clip_len, transform=validation_transforms),
@@ -86,12 +83,12 @@ def main(args):
         best_acc = 0
         print("=> no checkpoint found")
 
-    if args.checkpoint:
-        checkpoint = args.checkpoint
+    if args.checkpoint_path:
+        checkpoint_path = args.checkpoint_path
     else:
-        checkpoint = './ckpts/' + model_name + '/'
-    if not os.path.isdir(checkpoint):
-        os.makedirs(checkpoint)
+        checkpoint_path = './ckpts/' + model_name + '/'
+    if not os.path.isdir(checkpoint_path):
+        os.makedirs(checkpoint_path)
 
     accumulation_step = args.accumulation_step
     for epoch in range(args.start_epoch, args.epochs):
@@ -99,21 +96,20 @@ def main(args):
         valid_loss, valid_top1, valid_top5 = test(model, valid_loader, criterion, isSlowfast)
         scheduler.step()
 
-        file_name_last = os.path.join(checkpoint, 'model_epoch_%d.pth' % (epoch + 1,))
-        file_name_former = os.path.join(checkpoint, 'model_epoch_%d.pth' % epoch)
+        file_name_last = os.path.join(checkpoint_path, 'model_epoch_%d.pth' % (epoch + 1,))
+        file_name_former = os.path.join(checkpoint_path, 'model_epoch_%d.pth' % epoch)
 
         if valid_top1 > best_acc:
             best_acc = valid_top1
-            if os.path.isfile(checkpoint + 'best_model.pth'):
-                os.remove(checkpoint + 'best_model.pth')
-            #torch.save({'state_dict': model.state_dict(), 'epoch': epoch}, checkpoints + 'best_model.pth')
+            if os.path.isfile(checkpoint_path + 'best_model.pth'):
+                os.remove(checkpoint_path + 'best_model.pth')
             torch.save({
                 'epoch': epoch + 1,
                 'state_dict': model.state_dict(),
                 'optim_dict': optimizer.state_dict(),
                 'scheduler_dict': scheduler.state_dict(),
                 'best_acc': best_acc
-            }, checkpoint + 'best_model.pth')
+            }, checkpoint_path + 'best_model.pth')
 
         # save the latest model
         torch.save({
@@ -205,9 +201,9 @@ if __name__ == '__main__':
                         help='number of total epochs to train')
     parser.add_argument('--start-epoch', default=0, type=int, metavar='N',
                         help='manual epoch number (useful on restarts)')
-    parser.add_argument("--batch", type=int, default=5,
+    parser.add_argument("--batch", type=int, default=16,
                         help="batch size")
-    parser.add_argument("--val-batch", type=int, default=6,
+    parser.add_argument("--val-batch", type=int, default=32,
                         help="batch size")
     # optimizer
     parser.add_argument('--optim', default='adam', type=str,
@@ -226,7 +222,7 @@ if __name__ == '__main__':
                         help='path to latest checkpoint (default: none)')
     parser.add_argument('--writer', default='', type=str, metavar='PATH',
                         help='path of SummaryWriter')
-    parser.add_argument('--checkpoint', default='', type=str, metavar='PATH',
+    parser.add_argument('--checkpoint-path', default='', type=str, metavar='PATH',
                         help='path to save model')
     parser.add_argument('--pretrained', default='', type=str, metavar='PATH',
                         help='path of pretrained model')

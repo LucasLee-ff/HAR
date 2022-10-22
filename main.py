@@ -194,17 +194,17 @@ def test(model, test_loader, criterion, isSlowfast):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--model', default='r3d', type=str,
-                        help='model, can be slowfast, r3d, r2+1d, x3d')
+                        help='model to use, can be slowfast, r3d, r2+1d, x3d')
 
     # basic
     parser.add_argument('--epochs', default=100, type=int, metavar='N',
                         help='number of total epochs to train')
-    parser.add_argument('--start-epoch', default=0, type=int, metavar='N',
+    parser.add_argument('--start-epoch', default=0, type=int,
                         help='manual epoch number (useful on restarts)')
     parser.add_argument("--batch", type=int, default=16,
                         help="batch size")
     parser.add_argument("--val-batch", type=int, default=32,
-                        help="batch size")
+                        help="batch size for validation set")
     # optimizer
     parser.add_argument('--optim', default='adam', type=str,
                         help='optimizer')
@@ -212,19 +212,19 @@ if __name__ == '__main__':
                         metavar='LR', help='initial learning rate')
     parser.add_argument("--wd", type=float, default=1e-4,
                         help="weight decay")
-    parser.add_argument('--momentum', default=0.9, type=float, metavar='M',
+    parser.add_argument('--momentum', default=0.9, type=float,
                         help='momentum')
-    parser.add_argument('--accumulation-step', default=1, type=int, metavar='N',
-                        help='')
+    parser.add_argument('--accumulation-step', default=1, type=int,
+                        help='number of batch to calculate before update net params')
 
     # path
     parser.add_argument('--resume', default='', type=str, metavar='PATH',
-                        help='path to latest checkpoint (default: none)')
-    parser.add_argument('--writer', default='', type=str, metavar='PATH',
+                        help='path to latest checkpoint')
+    parser.add_argument('--writer', default='', type=str,
                         help='path of SummaryWriter')
-    parser.add_argument('--checkpoint-path', default='', type=str, metavar='PATH',
+    parser.add_argument('--checkpoint-path', default='', type=str,
                         help='path to save model')
-    parser.add_argument('--pretrained', default='', type=str, metavar='PATH',
+    parser.add_argument('--pretrained', default='', type=str,
                         help='path of pretrained model')
     args = parser.parse_args()
     main(args)

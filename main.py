@@ -8,8 +8,12 @@ from torch.utils.tensorboard import SummaryWriter
 import numpy as np
 import os
 import argparse
-from models.net import Net
-from torchvision.transforms import RandomHorizontalFlip, RandomCrop, CenterCrop
+from models.net import Net, MultiScaleNet
+from torchvision.transforms import RandomHorizontalFlip, RandomCrop, CenterCrop, Resize
+
+
+isSlowfast = False
+isMultiScale = False
 
 
 def main(args):
@@ -18,15 +22,22 @@ def main(args):
     np.random.seed(2022)
 
     model_name = args.model.lower()
-    model = Net(model_name=model_name, num_classes=10)
-    new_layers = model.new_layers
-
-    if model_name == 'slowfast':
+    global isSlowfast
+    global isMultiScale
+    if 'slowfast' in model_name:
         isSlowfast = True
         clip_len = 32
+        if 'multiscale' in model_name:
+            isMultiScale = True
     else:
         isSlowfast = False
         clip_len = 16
+
+    if isMultiScale:
+        model = MultiScaleNet(num_classes=10)
+    else:
+        model = Net(model_name=model_name, num_classes=10)
+    new_layers = model.new_layers
 
     if args.pretrained:
         pretrained_path = args.pretrained
@@ -47,27 +58,33 @@ def main(args):
     assert args.optim == 'adam' or args.optim == 'sgd', 'no such optimizer option'
     if args.optim == 'adam':
         optimizer = torch.optim.Adam(params, lr=args.lr, weight_decay=args.wd)
-    elif args.optim == 'sgd':
+    else:
         optimizer = torch.optim.SGD(params, lr=args.lr, weight_decay=args.wd)
     scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, [10, 30, 70])
 
-    train_transforms = nn.Sequential(
-        RandomHorizontalFlip(),
-        RandomCrop((224, 224))
-    )
+    train_transforms = nn.Sequential(RandomHorizontalFlip(), RandomCrop((224, 224)))
     validation_transforms = CenterCrop((224, 224))
-    train_loader = DataLoader(DarkVid('./data', mode='train', clip_len=clip_len, transform=train_transforms),
+    multi_scale_transforms = Resize(112) if isMultiScale else None
+    train_loader = DataLoader(DarkVid('./data',
+                                      mode='train',
+                                      clip_len=clip_len,
+                                      transform=train_transforms,
+                                      multi_scale=multi_scale_transforms),
                               batch_size=args.batch, shuffle=True)
-    valid_loader = DataLoader(DarkVid('./data', mode='validate', clip_len=clip_len, transform=validation_transforms),
+    valid_loader = DataLoader(DarkVid('./data',
+                                      mode='validate',
+                                      clip_len=clip_len,
+                                      transform=validation_transforms,
+                                      multi_scale=multi_scale_transforms),
                               batch_size=args.val_batch)
 
     if args.writer:
         writer_path = args.writer
     else:
-        writer_path = './log' + model_name + '/'
+        writer_path = './log_' + model_name + '/'
     if not os.path.isdir(writer_path):
         os.makedirs(writer_path)
-    settings = 'LR{:.4f}_B{:d}'.format(args.lr, args.batch)
+    settings = 'LR{:.4f}_B{:d}'.format(args.lr, args.batch * args.accumulation_step)
     writer = SummaryWriter(writer_path + settings)
 
     if args.resume and os.path.isfile(args.resume):
@@ -84,32 +101,34 @@ def main(args):
         print("=> no checkpoint found")
 
     if args.checkpoint_path:
-        checkpoint_path = args.checkpoint_path
+        checkpoint_path = os.path.join(args.checkpoint_path, settings)
     else:
-        checkpoint_path = './ckpts/' + model_name + '/'
+        checkpoint_path = './ckpts/' + model_name
+        checkpoint_path = os.path.join(checkpoint_path, settings)
     if not os.path.isdir(checkpoint_path):
         os.makedirs(checkpoint_path)
 
     accumulation_step = args.accumulation_step
     for epoch in range(args.start_epoch, args.epochs):
-        train_loss, train_top1, train_top5 = train(model, train_loader, criterion, optimizer, epoch, isSlowfast, accumulation_step)
-        valid_loss, valid_top1, valid_top5 = test(model, valid_loader, criterion, isSlowfast)
+        train_loss, train_top1, train_top5 = train(model, train_loader, criterion, optimizer, epoch, accumulation_step)
+        valid_loss, valid_top1, valid_top5 = test(model, valid_loader, criterion)
         scheduler.step()
 
         file_name_last = os.path.join(checkpoint_path, 'model_epoch_%d.pth' % (epoch + 1,))
         file_name_former = os.path.join(checkpoint_path, 'model_epoch_%d.pth' % epoch)
 
-        if valid_top1 > best_acc:
+        if valid_top1 >= best_acc:
             best_acc = valid_top1
-            if os.path.isfile(checkpoint_path + 'best_model.pth'):
-                os.remove(checkpoint_path + 'best_model.pth')
+            best_model_path = os.path.join(checkpoint_path, 'best_model.pth')
+            if os.path.isfile(best_model_path):
+                os.remove(best_model_path)
             torch.save({
                 'epoch': epoch + 1,
                 'state_dict': model.state_dict(),
                 'optim_dict': optimizer.state_dict(),
                 'scheduler_dict': scheduler.state_dict(),
                 'best_acc': best_acc
-            }, checkpoint_path + 'best_model.pth')
+            }, best_model_path)
 
         # save the latest model
         torch.save({
@@ -129,19 +148,29 @@ def main(args):
         writer.add_scalars('Top5', {'train': train_top5, 'validation': valid_top5}, epoch + 1)
 
 
-def train(model, train_loader, criterion, optimizer, epoch, isSlowfast, accumulation_steps=1):
+def train(model, train_loader, criterion, optimizer, epoch, accumulation_steps=1):
+    global isSlowfast
+    global isMultiScale
     model.train()
     loss_sum, n = 0, 0
     preds, targets = [], []
     pbar = tqdm(enumerate(train_loader), total=len(train_loader))
-    for i, (inputs, target) in pbar:
+    for i, data in pbar:
         n += 1
-        inputs = inputs.cuda()
-        target = target.cuda()
-        if isSlowfast:
-            inputs_var = [inputs[:, :, ::4, :, :], inputs]
+        if isMultiScale:
+            inputs1, inputs2, target = data
+            inputs1 = inputs1.cuda()
+            inputs2 = inputs2.cuda()
+            target = target.cuda()
+            inputs_var = [[inputs1[:, :, ::4, :, :], inputs1], [inputs2[:, :, ::4, :, :], inputs2]]
         else:
-            inputs_var = inputs
+            inputs, target = data
+            inputs = inputs.cuda()
+            target = target.cuda()
+            if isSlowfast:
+                inputs_var = [inputs[:, :, ::4, :, :], inputs]
+            else:
+                inputs_var = inputs
         output = model(inputs_var)
         preds.append(output.detach())
         targets.append(target)
@@ -163,19 +192,29 @@ def train(model, train_loader, criterion, optimizer, epoch, isSlowfast, accumula
     return loss_avg, top1, top5
 
 
-def test(model, test_loader, criterion, isSlowfast):
+def test(model, test_loader, criterion):
+    global isSlowfast
+    global isMultiScale
     model.eval()
     loss_sum, n = 0, 0
     preds, targets = [], []
     pbar = tqdm(enumerate(test_loader), total=len(test_loader))
-    for i, (inputs, target) in pbar:
+    for i, data in pbar:
         n += 1
-        inputs = inputs.cuda()
-        target = target.cuda()
-        if isSlowfast:
-            inputs_var = [inputs[:, :, ::4, :, :], inputs]
+        if isMultiScale:
+            inputs1, inputs2, target = data
+            inputs1 = inputs1.cuda()
+            inputs2 = inputs2.cuda()
+            target = target.cuda()
+            inputs_var = [[inputs1[:, :, ::4, :, :], inputs1], [inputs2[:, :, ::4, :, :], inputs2]]
         else:
-            inputs_var = inputs
+            inputs, target = data
+            inputs = inputs.cuda()
+            target = target.cuda()
+            if isSlowfast:
+                inputs_var = [inputs[:, :, ::4, :, :], inputs]
+            else:
+                inputs_var = inputs
         with torch.no_grad():
             output = model(inputs_var)
             preds.append(output.detach())
@@ -194,7 +233,7 @@ def test(model, test_loader, criterion, isSlowfast):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--model', default='r3d', type=str,
-                        help='model to use, can be slowfast, r3d, r2+1d, x3d')
+                        help='model to use, can be multiscale_slowfast, slowfast, r3d, r2+1d, x3d')
 
     # basic
     parser.add_argument('--epochs', default=100, type=int, metavar='N',

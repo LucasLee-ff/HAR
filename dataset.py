@@ -6,11 +6,12 @@ from dataset_utils import load_video, downsample, random_sample, center_sample, 
 
 
 class DarkVid(Dataset):
-    def __init__(self, root, mode='train', clip_len=16, transform=None):
+    def __init__(self, root, mode='train', clip_len=16, transform=None, multi_scale=None):
         self.root = root
         self.mode = mode
         self.clip_len = clip_len
         self.transform = transform
+        self.multi_scale = multi_scale
         self.vid_list = []
         self.label_list = []
         with open(os.path.join(root, mode + '.txt')) as f:
@@ -23,7 +24,6 @@ class DarkVid(Dataset):
     def __getitem__(self, idx):
         vid_path = os.path.join(self.root, self.mode, self.vid_list[idx])
         buffer = load_video(vid_path)
-
         # if the total number of frames in the video is larger than 64, downsample along the temporal axis by 2 first.
         if len(buffer) >= 2 * self.clip_len:
             if self.mode == 'train':
@@ -44,7 +44,11 @@ class DarkVid(Dataset):
         buffer = torch.from_numpy(buffer)
         if self.transform:
             buffer = self.transform(buffer)
-        return buffer, torch.tensor(self.label_list[idx])
+        if self.multi_scale:
+            buffer2 = self.multi_scale(buffer)
+            return buffer, buffer2, torch.tensor(self.label_list[idx])
+        else:
+            return buffer, torch.tensor(self.label_list[idx])
 
     def __len__(self):
         return len(self.label_list)

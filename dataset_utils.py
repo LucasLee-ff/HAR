@@ -5,6 +5,8 @@ import numpy as np
 def load_video(path):
     # Load all frames of the video
     vid = cv2.VideoCapture(path)
+    if not vid.isOpened():
+        raise Exception('no video in {}'.format(path))
     total_frames = int(vid.get(cv2.CAP_PROP_FRAME_COUNT))
     height = int(vid.get(cv2.CAP_PROP_FRAME_HEIGHT))
     width = int(vid.get(cv2.CAP_PROP_FRAME_WIDTH))
@@ -37,19 +39,17 @@ def downsample(buffer, start=0, interval=2):
 def random_sample(buffer, clip_len):
     # get clip_len consecutive frames start from a randomly selected index
     length = len(buffer)
-    start_idx = np.random.randint(0, length - clip_len + 1)
-    try:
-        return buffer[start_idx:start_idx + clip_len, :, :, :]
-    except:
+    if clip_len > length:
         raise Exception("clip_len too large!")
+    start_idx = np.random.randint(0, length - clip_len + 1)
+    return buffer[start_idx:start_idx + clip_len, :, :, :]
 
 
 def center_sample(buffer, clip_len):
     length = len(buffer)
+    if clip_len > length:
+        raise Exception("clip_len too large!")
     center_idx = length // 2
     offset = clip_len // 2
-    try:
-        return buffer[center_idx - offset:center_idx + offset, :, :, :]
-    except:
-        raise Exception("clip_len too large!")
+    return buffer[center_idx - offset:center_idx + offset, :, :, :]
 

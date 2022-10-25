@@ -35,3 +35,37 @@ class Net(nn.Module):
         model_dict = self.backbone.state_dict()
         model_dict.update(pretrained_dict)
         self.backbone.load_state_dict(model_dict)
+
+
+class MultiScaleNet(nn.Module):
+    def __init__(self, num_classes=10):
+        super(MultiScaleNet, self).__init__()
+        self.branch_large = pytorchvideo.models.create_slowfast(model_num_class=num_classes,
+                                                           head_pool_kernel_sizes=((8, 7, 7), (32, 7, 7)))
+        self.branch_small = pytorchvideo.models.create_slowfast(model_num_class=num_classes,
+                                                           head_pool_kernel_sizes=((8, 4, 4), (32, 4, 4)))
+        self.new_layers = ['blocks.6.proj.weight', 'blocks.6.proj.bias',
+                           'branch_large.blocks.6.proj.weight', 'branch_large.blocks.6.proj.bias',
+                           'branch_small.blocks.6.proj.weight', 'branch_small.blocks.6.proj.bias']
+
+    def forward(self, x):
+        y1 = self.branch_large(x[0])
+        y2 = self.branch_small(x[1])
+
+        # fuse two prediction by averaging
+        y3 = torch.stack((y1, y2))
+        y = torch.mean(y3, dim=0)
+        return y
+
+    def load_pretrained(self, path):
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        pretrained_dict = torch.load(path, map_location=device)
+        pretrained_dict = {k: v for k, v in pretrained_dict.items() if k not in self.new_layers}
+
+        model_dict1 = self.branch_large.state_dict()
+        model_dict1.update(pretrained_dict)
+        self.branch_large.load_state_dict(model_dict1)
+
+        model_dict2 = self.branch_small.state_dict()
+        model_dict2.update(pretrained_dict)
+        self.branch_small.load_state_dict(model_dict2)

@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch
 import pytorchvideo.models
 import pytorchvideo.models.x3d as X3D
+from .non_local import create_slowfast_nl
 
 
 class Net(nn.Module):
@@ -69,3 +70,32 @@ class MultiScaleNet(nn.Module):
         model_dict2 = self.branch_small.state_dict()
         model_dict2.update(pretrained_dict)
         self.branch_small.load_state_dict(model_dict2)
+
+
+class SlowfastNL(nn.Module):
+    def __init__(self, num_classes=10):
+        super(SlowfastNL, self).__init__()
+        self.backbone = create_slowfast_nl(model_num_class=num_classes)
+        self.new_layers = ['blocks.6.proj.weight', 'blocks.6.proj.bias']
+
+    def forward(self, x):
+        x = self.backbone(x)
+        return x
+
+    def load_pretrained(self, path):
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        pretrained_dict = torch.load(path, map_location=device)
+        new_pretrained_dict = dict()
+        for k, v in pretrained_dict.items():
+            if k in self.new_layers:
+                continue
+            param_name = k.split('.')
+            n = int(param_name[1])
+            if n >= 3:
+                param_name[1] = str(n + 1)
+                new_pretrained_dict['.'.join(param_name)] = v
+            else:
+                new_pretrained_dict[k] = v
+        model_dict = self.backbone.state_dict()
+        model_dict.update(new_pretrained_dict)
+        self.backbone.load_state_dict(model_dict)

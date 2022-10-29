@@ -8,7 +8,7 @@ from torch.utils.tensorboard import SummaryWriter
 import numpy as np
 import os
 import argparse
-from models.net import Net, MultiScaleNet
+from models.net import Net, MultiScaleNet, SlowfastNL
 from torchvision.transforms import RandomHorizontalFlip, RandomCrop, CenterCrop, Resize
 
 
@@ -35,6 +35,8 @@ def main(args):
 
     if isMultiScale:
         model = MultiScaleNet(num_classes=10)
+    elif model_name == 'slowfast_nl':
+        model = SlowfastNL(num_classes=10)
     else:
         model = Net(model_name=model_name, num_classes=10)
     new_layers = model.new_layers
@@ -85,7 +87,7 @@ def main(args):
     if not os.path.isdir(writer_path):
         os.makedirs(writer_path)
     settings = 'LR{:.4f}_B{:d}'.format(args.lr, args.batch * args.accumulation_step)
-    writer = SummaryWriter(writer_path + settings)
+    writer = SummaryWriter(os.path.join(writer_path, settings))
 
     if args.resume and os.path.isfile(args.resume):
         print("=> loading checkpoint '{}'".format(args.resume))
@@ -233,7 +235,7 @@ def test(model, test_loader, criterion):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--model', default='r3d', type=str,
-                        help='model to use, can be multiscale_slowfast, slowfast, r3d, r2+1d, x3d')
+                        help='model to use, can be slowfast_nl, multiscale_slowfast, slowfast, r3d, r2+1d, x3d')
 
     # basic
     parser.add_argument('--epochs', default=100, type=int, metavar='N',

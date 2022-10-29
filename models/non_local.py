@@ -322,7 +322,7 @@ def create_slowfast_nl(
         # add non-local layer after res3
         if idx == 1:
             nonlocal_slow = create_nonlocal(dim_in=640, dim_inner=320)
-            nonlocal_fast = create_nonlocal(dim_in=64, dim_inner=32)
+            nonlocal_fast = nn.Identity()  # create_nonlocal(dim_in=64, dim_inner=32)
             stages.append(
                 NonlocalLayer(
                     nonlocal_blocks=nn.ModuleList([nonlocal_slow, nonlocal_fast])

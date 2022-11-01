@@ -51,7 +51,8 @@ def center_sample(buffer, clip_len):
         raise Exception("clip_len too large!")
     center_idx = length // 2
     offset = clip_len // 2
-    return buffer[center_idx - offset:center_idx + offset, :, :, :]
+    extra = clip_len % 2
+    return buffer[center_idx - offset:center_idx + offset + extra, :, :, :]
 
 
 def get_time_diff(buffer):

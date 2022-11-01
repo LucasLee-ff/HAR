@@ -55,13 +55,13 @@ def main(args):
                                       clip_len=32,
                                       transform=train_transforms,
                                       diff=True),
-                              batch_size=args.batch, shuffle=True)
+                              batch_size=args.batch, num_workers=args.workers, shuffle=True)
     valid_loader = DataLoader(DarkVid('./data',
                                       mode='validate',
                                       clip_len=32,
                                       transform=validation_transforms,
                                       diff=True),
-                              batch_size=args.val_batch)
+                              batch_size=args.val_batch, num_workers=args.workers)
 
     if args.writer:
         writer_path = args.writer
@@ -200,6 +200,8 @@ if __name__ == '__main__':
                         help="batch size")
     parser.add_argument("--val-batch", type=int, default=32,
                         help="batch size for validation set")
+    parser.add_argument("--workers", type=int, default=6,
+                        help="num_workers for DataLoader")
     # optimizer
     parser.add_argument('--optim', default='adam', type=str,
                         help='optimizer')

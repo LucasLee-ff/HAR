@@ -53,3 +53,10 @@ def center_sample(buffer, clip_len):
     offset = clip_len // 2
     return buffer[center_idx - offset:center_idx + offset, :, :, :]
 
+
+def get_time_diff(buffer):
+    # get time difference images by subtracting img(t+1) and img(t)
+    former = buffer[:-1]
+    latter = buffer[1:]
+    diff = latter - former
+    return diff

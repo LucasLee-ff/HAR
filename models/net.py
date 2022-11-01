@@ -21,9 +21,6 @@ class Net(nn.Module):
             self.backbone = X3D.create_x3d(input_clip_length=16, input_crop_size=224, depth_factor=2.2,
                                            model_num_class=num_classes)
             self.new_layers = ['blocks.5.proj.weight', 'blocks.5.proj.bias']
-        else:
-            self.backbone = pytorchvideo.models.create_slowfast(model_num_class=num_classes)
-            self.new_layers = ['blocks.6.proj.weight', 'blocks.6.proj.bias']
 
     def forward(self, x):
         x = self.backbone(x)
@@ -36,6 +33,7 @@ class Net(nn.Module):
         model_dict = self.backbone.state_dict()
         model_dict.update(pretrained_dict)
         self.backbone.load_state_dict(model_dict)
+        print("=> loaded pretrained model {}".format(path))
 
 
 class MultiScaleNet(nn.Module):
@@ -70,6 +68,27 @@ class MultiScaleNet(nn.Module):
         model_dict2 = self.branch_small.state_dict()
         model_dict2.update(pretrained_dict)
         self.branch_small.load_state_dict(model_dict2)
+        print("=> loaded pretrained model {}".format(path))
+
+
+class Slowfast(nn.Module):
+    def __init__(self, num_classes=10):
+        super(Slowfast, self).__init__()
+        self.backbone = pytorchvideo.models.create_slowfast(model_num_class=num_classes)
+        self.new_layers = ['blocks.6.proj.weight', 'blocks.6.proj.bias']
+
+    def forward(self, x):
+        x = self.backbone(x)
+        return x
+
+    def load_pretrained(self, path):
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        pretrained_dict = torch.load(path, map_location=device)
+        pretrained_dict = {k: v for k, v in pretrained_dict.items() if k not in self.new_layers}
+        model_dict = self.backbone.state_dict()
+        model_dict.update(pretrained_dict)
+        self.backbone.load_state_dict(model_dict)
+        print("=> loaded pretrained model {}".format(path))
 
 
 class SlowfastNL(nn.Module):
@@ -99,3 +118,21 @@ class SlowfastNL(nn.Module):
         model_dict = self.backbone.state_dict()
         model_dict.update(new_pretrained_dict)
         self.backbone.load_state_dict(model_dict)
+        print("=> loaded pretrained model {}".format(path))
+
+    def _load_pretrained(self, path):
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        pretrained_dict = torch.load(path, map_location=device)['state_dict']
+        new_pretrained_dict = dict()
+        for k, v in pretrained_dict.items():
+            param_name = k.split('.')
+            n = int(param_name[2])
+            if n >= 3:
+                param_name[2] = str(n + 1)
+                new_pretrained_dict['.'.join(param_name)] = v
+            else:
+                new_pretrained_dict[k] = v
+        model_dict = self.state_dict()
+        model_dict.update(new_pretrained_dict)
+        self.load_state_dict(model_dict)
+        print("=> loaded pretrained model {}".format(path))

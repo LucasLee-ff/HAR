@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from dataset import DarkVid
+from dataset import DarkVidBase
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 from sklearn.metrics import top_k_accuracy_score
@@ -8,8 +8,8 @@ from torch.utils.tensorboard import SummaryWriter
 import numpy as np
 import os
 import argparse
-from models.net import Slowfast, SlowfastNL
-from torchvision.transforms import RandomHorizontalFlip, RandomCrop, CenterCrop
+from models.net import Net
+from torchvision.transforms import RandomHorizontalFlip, RandomCrop, CenterCrop, Resize
 
 
 def main(args):
@@ -18,10 +18,8 @@ def main(args):
     np.random.seed(2022)
 
     model_name = args.model.lower()
-    if model_name == 'slowfast_nl':
-        model = SlowfastNL(num_classes=10)
-    else:
-        model = Slowfast(num_classes=10)
+
+    model = Net(model_name=model_name, num_classes=10)
     new_layers = model.new_layers
 
     if args.pretrained:
@@ -39,8 +37,7 @@ def main(args):
             classifier_params.append(val)
         else:
             base_params.append(val)
-    #params = [{'params': base_params, 'lr_mult': 1}, {'params': classifier_params, 'lr_mult': 1}]
-    params = [{'params': [val for param, val in model.named_parameters() if 'backbone.blocks.5' in param], 'lr_mult': 1}]
+    params = [{'params': base_params, 'lr_mult': 1}, {'params': classifier_params, 'lr_mult': 1}]
     assert args.optim == 'adam' or args.optim == 'sgd', 'no such optimizer option'
     if args.optim == 'adam':
         optimizer = torch.optim.Adam(params, lr=args.lr, weight_decay=args.wd)
@@ -50,17 +47,15 @@ def main(args):
 
     train_transforms = nn.Sequential(RandomHorizontalFlip(), RandomCrop((224, 224)))
     validation_transforms = CenterCrop((224, 224))
-    train_loader = DataLoader(DarkVid('./data',
+    train_loader = DataLoader(DarkVidBase('./data',
                                       mode='train',
-                                      clip_len=32,
-                                      transform=train_transforms,
-                                      diff=True),
+                                      clip_len=16,
+                                      transform=train_transforms),
                               batch_size=args.batch, shuffle=True)
-    valid_loader = DataLoader(DarkVid('./data',
+    valid_loader = DataLoader(DarkVidBase('./data',
                                       mode='validate',
-                                      clip_len=32,
-                                      transform=validation_transforms,
-                                      diff=True),
+                                      clip_len=16,
+                                      transform=validation_transforms),
                               batch_size=args.val_batch)
 
     if args.writer:
@@ -133,12 +128,10 @@ def train(model, train_loader, criterion, optimizer, epoch, accumulation_steps=1
     pbar = tqdm(enumerate(train_loader), total=len(train_loader))
     for i, data in pbar:
         n += 1
-        slow, fast, target = data
-        slow = slow.cuda()
-        fast = fast.cuda()
+        inputs, target = data
+        inputs = inputs.cuda()
         target = target.cuda()
-        inputs_var = [slow, fast]
-        output = model(inputs_var)
+        output = model(inputs)
         preds.append(output.detach())
         targets.append(target)
 
@@ -160,19 +153,19 @@ def train(model, train_loader, criterion, optimizer, epoch, accumulation_steps=1
 
 
 def test(model, test_loader, criterion):
+    global isSlowfast
+    global isMultiScale
     model.eval()
     loss_sum, n = 0, 0
     preds, targets = [], []
     pbar = tqdm(enumerate(test_loader), total=len(test_loader))
     for i, data in pbar:
         n += 1
-        slow, fast, target = data
-        slow = slow.cuda()
-        fast = fast.cuda()
+        inputs, target = data
+        inputs = inputs.cuda()
         target = target.cuda()
-        inputs_var = [slow, fast]
         with torch.no_grad():
-            output = model(inputs_var)
+            output = model(inputs)
             preds.append(output.detach())
             targets.append(target)
             loss = criterion(output, target)
@@ -189,7 +182,7 @@ def test(model, test_loader, criterion):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--model', default='r3d', type=str,
-                        help='model to use, can be slowfast_nl, slowfast')
+                        help='model to use, can be r3d, r2+1d, x3d')
 
     # basic
     parser.add_argument('--epochs', default=100, type=int, metavar='N',

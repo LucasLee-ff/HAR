@@ -25,9 +25,12 @@ def load_video(path):
 
 def normalize(buffer):
     # Normalize every frame using "mean" and "standard deviation from ARID dataset"
+    '''
     for i, frame in enumerate(buffer):
         frame = (frame - np.array([[[0.079612, 0.073888, 0.072454]]])) / np.array([[[0.100459, 0.0970497, 0.089911]]])
         buffer[i] = frame
+    '''
+    buffer = (buffer - np.array([[[0.079612, 0.073888, 0.072454]]])) / np.array([[[0.100459, 0.0970497, 0.089911]]])
     return buffer
 
 

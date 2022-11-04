@@ -6,12 +6,12 @@ from dataset_utils import load_video, downsample, random_sample, center_sample, 
 
 
 class DarkVid(Dataset):
-    def __init__(self, root, mode='train', clip_len=32, transform=None, diff=False):
+    def __init__(self, root, mode='train', clip_len=32, transform=None, modality='rgb'):
         self.root = root
         self.mode = mode
         self.clip_len = clip_len
-        self.diff = diff
-        if diff:
+        self.modality = modality
+        if modality != 'rgb':
             self.clip_len += 1
         self.transform = transform
         self.vid_list = []
@@ -45,10 +45,12 @@ class DarkVid(Dataset):
         buffer = torch.from_numpy(buffer)
         if self.transform:
             buffer = self.transform(buffer)
-        if self.diff:
+        if self.modality != 'rgb':
             diff = get_time_diff(buffer.permute((1, 2, 3, 0)))
-            diff = diff.permute((3, 0, 1, 2))
-            return buffer[:, 1::4, :, :], diff, torch.tensor(self.label_list[idx])
+            #diff = diff.permute((3, 0, 1, 2))
+            if self.modality == 'saliency':
+                return buffer[:, ::, :, :], diff, torch.tensor(self.label_list[idx])
+            return buffer[:, 1::4, :, :], diff.permute((3, 0, 1, 2)), torch.tensor(self.label_list[idx])
         else:
             return buffer[:, ::4, :, :], buffer, torch.tensor(self.label_list[idx])
 

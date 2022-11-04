@@ -19,7 +19,7 @@ class Net(nn.Module):
             self.new_layers = ['fc.weight', 'fc.bias']
         elif self.model_name == 'x3d':
             self.backbone = X3D.create_x3d(input_clip_length=16, input_crop_size=224, depth_factor=2.2,
-                                           model_num_class=num_classes)
+                                           model_num_class=num_classes, head_activation=None)
             self.new_layers = ['blocks.5.proj.weight', 'blocks.5.proj.bias']
 
     def forward(self, x):
@@ -40,9 +40,9 @@ class MultiScaleNet(nn.Module):
     def __init__(self, num_classes=10):
         super(MultiScaleNet, self).__init__()
         self.branch_large = pytorchvideo.models.create_slowfast(model_num_class=num_classes,
-                                                           head_pool_kernel_sizes=((8, 7, 7), (32, 7, 7)))
+                                                                head_pool_kernel_sizes=((8, 7, 7), (32, 7, 7)))
         self.branch_small = pytorchvideo.models.create_slowfast(model_num_class=num_classes,
-                                                           head_pool_kernel_sizes=((8, 4, 4), (32, 4, 4)))
+                                                                head_pool_kernel_sizes=((8, 4, 4), (32, 4, 4)))
         self.new_layers = ['blocks.6.proj.weight', 'blocks.6.proj.bias',
                            'branch_large.blocks.6.proj.weight', 'branch_large.blocks.6.proj.bias',
                            'branch_small.blocks.6.proj.weight', 'branch_small.blocks.6.proj.bias']
@@ -72,10 +72,13 @@ class MultiScaleNet(nn.Module):
 
 
 class Slowfast(nn.Module):
-    def __init__(self, num_classes=10):
+    def __init__(self, num_classes=10, input_channels=(3, 3)):
         super(Slowfast, self).__init__()
-        self.backbone = pytorchvideo.models.create_slowfast(model_num_class=num_classes)
+        self.backbone = pytorchvideo.models.create_slowfast(model_num_class=num_classes, input_channels=input_channels)
         self.new_layers = ['blocks.6.proj.weight', 'blocks.6.proj.bias']
+        if input_channels != (3, 3):
+            self.new_layers = self.new_layers + ['blocks.0.multipathway_blocks.0.conv.weight',
+                                                 'blocks.0.multipathway_blocks.1.conv.weight']
 
     def forward(self, x):
         x = self.backbone(x)
@@ -92,9 +95,9 @@ class Slowfast(nn.Module):
 
 
 class SlowfastNL(nn.Module):
-    def __init__(self, num_classes=10):
+    def __init__(self, num_classes=10, head_activation=None):
         super(SlowfastNL, self).__init__()
-        self.backbone = create_slowfast_nl(model_num_class=num_classes)
+        self.backbone = create_slowfast_nl(model_num_class=num_classes, head_activation=head_activation)
         self.new_layers = ['blocks.6.proj.weight', 'blocks.6.proj.bias']
 
     def forward(self, x):
@@ -102,6 +105,7 @@ class SlowfastNL(nn.Module):
         return x
 
     def load_pretrained(self, path):
+        # load kinetics400 pretrained slowfast
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         pretrained_dict = torch.load(path, map_location=device)
         new_pretrained_dict = dict()
@@ -120,19 +124,37 @@ class SlowfastNL(nn.Module):
         self.backbone.load_state_dict(model_dict)
         print("=> loaded pretrained model {}".format(path))
 
-    def _load_pretrained(self, path):
+    def load_pretrained_arid(self, path):
+        # load arid pretrained slowfast
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         pretrained_dict = torch.load(path, map_location=device)['state_dict']
         new_pretrained_dict = dict()
         for k, v in pretrained_dict.items():
             param_name = k.split('.')
-            n = int(param_name[2])
-            if n >= 3:
-                param_name[2] = str(n + 1)
-                new_pretrained_dict['.'.join(param_name)] = v
-            else:
-                new_pretrained_dict[k] = v
+            new_pretrained_dict['.'.join(param_name[1:])] = v
         model_dict = self.state_dict()
         model_dict.update(new_pretrained_dict)
         self.load_state_dict(model_dict)
         print("=> loaded pretrained model {}".format(path))
+
+
+class MultiBranchSlowfast(nn.Module):
+    def __init__(self, num_classes=10):
+        super(MultiBranchSlowfast, self).__init__()
+        # self.backbone = pytorchvideo.models.create_slowfast(model_num_class=num_classes, head_activation=nn.ReLU)
+        self.backbone = SlowfastNL(head_activation=nn.ReLU)
+        self.RGB_diff = Net(model_name='x3d', num_classes=num_classes)
+        self.fuse = nn.Linear(20, 10)
+        self.dropout = nn.Dropout()
+        self.new_layers = ['blocks.6.proj.weight', 'blocks.6.proj.bias']
+
+    def forward(self, x):
+        y1 = self.backbone(x[:2])
+        y2 = self.RGB_diff(x[-1])
+        y3 = torch.concat((y1, y2), dim=1)
+        y = self.fuse(y3)
+        return y
+
+    def load_pretrained(self, path):
+        self.RGB_diff.load_pretrained('/home/lzf/HAR/models/X3D_M.pth')
+        self.backbone.load_pretrained_arid(path)

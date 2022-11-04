@@ -9,38 +9,51 @@ import numpy as np
 import os
 import argparse
 from models.net import Slowfast, SlowfastNL
-from torchvision.transforms import RandomHorizontalFlip, RandomCrop, CenterCrop
+from torchvision.transforms import RandomHorizontalFlip, RandomCrop, CenterCrop, Resize
+from saliency_detection.saliency import bulid_saliency_model, get_fast_input, get_saliency_batch
 
 
 def main(args):
+    os.environ['CUDA_VISIBLE_DEVICES'] = '0, 1, 2, 3'
+    curr_path = os.getcwd()
+    curr_path = os.path.join(curr_path, '/HAR')
     torch.manual_seed(2022)
     torch.cuda.manual_seed(2022)
     np.random.seed(2022)
 
     model_name = args.model.lower()
+
     if model_name == 'slowfast_nl':
         model = SlowfastNL(num_classes=10)
     else:
         model = Slowfast(num_classes=10)
+        # model = MultiBranchSlowfast()
     new_layers = model.new_layers
 
     if args.pretrained:
         pretrained_path = args.pretrained
         model.load_pretrained(pretrained_path)
+
+    model = nn.DataParallel(model)
     model = model.cuda()
+
+    # saliency_model = bulid_saliency_model()
+    # saliency_model = nn.DataParallel(saliency_model)
+    # saliency_model = saliency_model.cuda()
+    # saliency_model.eval()
 
     criterion = nn.CrossEntropyLoss().cuda()
 
     base_params = []
-    classifier_params = []
-
+    new_params = []
     for param, val in model.named_parameters():
         if param in new_layers:
-            classifier_params.append(val)
+            new_params.append(val)
         else:
             base_params.append(val)
-    #params = [{'params': base_params, 'lr_mult': 1}, {'params': classifier_params, 'lr_mult': 1}]
-    params = [{'params': [val for param, val in model.named_parameters() if 'backbone.blocks.5' in param], 'lr_mult': 1}]
+
+    params = [{'params': base_params, 'lr_mult': 1}, {'params': new_params, 'lr_mult': 1}]
+    # params = [{'params': new_params, 'lr_mult': 1}]
     assert args.optim == 'adam' or args.optim == 'sgd', 'no such optimizer option'
     if args.optim == 'adam':
         optimizer = torch.optim.Adam(params, lr=args.lr, weight_decay=args.wd)
@@ -50,23 +63,24 @@ def main(args):
 
     train_transforms = nn.Sequential(RandomHorizontalFlip(), RandomCrop((224, 224)))
     validation_transforms = CenterCrop((224, 224))
-    train_loader = DataLoader(DarkVid('./data',
+    train_loader = DataLoader(DarkVid('/home/lzf/HAR/data/',
                                       mode='train',
                                       clip_len=32,
                                       transform=train_transforms,
-                                      diff=True),
-                              batch_size=args.batch, num_workers=args.workers, shuffle=True)
-    valid_loader = DataLoader(DarkVid('./data',
+                                      modality='rgb'),
+                              batch_size=args.batch, shuffle=True, num_workers=args.workers)
+    valid_loader = DataLoader(DarkVid('/home/lzf/HAR/data/',
                                       mode='validate',
                                       clip_len=32,
                                       transform=validation_transforms,
-                                      diff=True),
+                                      modality='rgb'),
                               batch_size=args.val_batch, num_workers=args.workers)
 
     if args.writer:
         writer_path = args.writer
     else:
         writer_path = 'log/log_' + model_name + '/'
+        writer_path = os.path.join(curr_path, writer_path)
     if not os.path.isdir(writer_path):
         os.makedirs(writer_path)
     settings = 'LR{:.4f}_B{:d}'.format(args.lr, args.batch * args.accumulation_step)
@@ -88,7 +102,8 @@ def main(args):
     if args.checkpoint_path:
         checkpoint_path = os.path.join(args.checkpoint_path, settings)
     else:
-        checkpoint_path = './ckpts/' + model_name
+        checkpoint_path = '/ckpts/' + model_name
+        checkpoint_path = os.path.join(curr_path, checkpoint_path)
         checkpoint_path = os.path.join(checkpoint_path, settings)
     if not os.path.isdir(checkpoint_path):
         os.makedirs(checkpoint_path)
@@ -134,8 +149,8 @@ def train(model, train_loader, criterion, optimizer, epoch, accumulation_steps=1
     for i, data in pbar:
         n += 1
         slow, fast, target = data
-        slow = slow.cuda()
-        fast = fast.cuda()
+        slow = slow.cuda().float()
+        fast = fast.cuda().float()
         target = target.cuda()
         inputs_var = [slow, fast]
         output = model(inputs_var)
@@ -167,8 +182,8 @@ def test(model, test_loader, criterion):
     for i, data in pbar:
         n += 1
         slow, fast, target = data
-        slow = slow.cuda()
-        fast = fast.cuda()
+        slow = slow.cuda().float()
+        fast = fast.cuda().float()
         target = target.cuda()
         inputs_var = [slow, fast]
         with torch.no_grad():
@@ -188,9 +203,8 @@ def test(model, test_loader, criterion):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--model', default='r3d', type=str,
+    parser.add_argument('--model', default='slowfast', type=str,
                         help='model to use, can be slowfast_nl, slowfast')
-
     # basic
     parser.add_argument('--epochs', default=100, type=int, metavar='N',
                         help='number of total epochs to train')
@@ -213,15 +227,14 @@ if __name__ == '__main__':
                         help='momentum')
     parser.add_argument('--accumulation-step', default=1, type=int,
                         help='number of batch to calculate before update net params')
-
     # path
     parser.add_argument('--resume', default='', type=str, metavar='PATH',
                         help='path to latest checkpoint')
-    parser.add_argument('--writer', default='', type=str,
+    parser.add_argument('--writer', default='/home/lzf/HAR/log/log_slowfast', type=str,
                         help='path of SummaryWriter')
-    parser.add_argument('--checkpoint-path', default='', type=str,
+    parser.add_argument('--checkpoint-path', default='/home/lzf/HAR/ckpts/slowfast/', type=str,
                         help='path to save model')
-    parser.add_argument('--pretrained', default='', type=str,
+    parser.add_argument('--pretrained', default='/home/lzf/HAR/models/SLOWFAST_8x8_R50.pth', type=str,
                         help='path of pretrained model')
     args = parser.parse_args()
     main(args)

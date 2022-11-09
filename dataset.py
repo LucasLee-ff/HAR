@@ -2,17 +2,20 @@ from torch.utils.data import Dataset
 import torch
 import numpy as np
 import os
-from dataset_utils import load_video, downsample, random_sample, center_sample, normalize, get_time_diff
+from dataset_utils import load_video, downsample, random_sample, center_sample, normalize, get_time_diff, enhance
 
 
 class DarkVid(Dataset):
-    def __init__(self, root, mode='train', clip_len=32, transform=None, modality='rgb'):
+    def __init__(self, root, mode='train', clip_len=32, transform=None, modality='rgb', enhancement='normalize',
+                 gamma=2):
         self.root = root
         self.mode = mode
         self.clip_len = clip_len
         self.modality = modality
         if modality != 'rgb':
             self.clip_len += 1
+        self.enhancement = enhancement
+        self.gamma = gamma
         self.transform = transform
         self.vid_list = []
         self.label_list = []
@@ -39,16 +42,16 @@ class DarkVid(Dataset):
             buffer = random_sample(buffer, self.clip_len)
         else:
             buffer = center_sample(buffer, self.clip_len)
-        buffer = buffer / 255.0
-        buffer = normalize(buffer)
+
+        buffer = enhance(buffer, mode=self.enhancement, gamma=self.gamma)
         buffer = buffer.transpose((3, 0, 1, 2))  # (T, H, W, C) -> (C, T, H, W)
         buffer = torch.from_numpy(buffer)
         if self.transform:
             buffer = self.transform(buffer)
         if self.modality != 'rgb':
             diff = get_time_diff(buffer.permute((1, 2, 3, 0)))
-            #diff = diff.permute((3, 0, 1, 2))
-            if self.modality == 'saliency':
+            # diff = diff.permute((3, 0, 1, 2))
+            if self.modality == 'diffXsaliency':
                 return buffer[:, ::, :, :], diff, torch.tensor(self.label_list[idx])
             return buffer[:, 1::4, :, :], diff.permute((3, 0, 1, 2)), torch.tensor(self.label_list[idx])
         else:

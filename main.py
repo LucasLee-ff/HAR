@@ -9,8 +9,8 @@ import numpy as np
 import os
 import argparse
 from models.net import Slowfast, SlowfastNL
-from torchvision.transforms import RandomHorizontalFlip, RandomCrop, CenterCrop, Resize
-from saliency_detection.saliency import bulid_saliency_model, get_fast_input, get_saliency_batch
+from torchvision.transforms import RandomHorizontalFlip, RandomCrop, CenterCrop
+from saliency_detection.saliency import bulid_saliency_model
 
 
 def main(args):
@@ -27,7 +27,6 @@ def main(args):
         model = SlowfastNL(num_classes=10)
     else:
         model = Slowfast(num_classes=10)
-        # model = MultiBranchSlowfast()
     new_layers = model.new_layers
 
     if args.pretrained:
@@ -37,10 +36,13 @@ def main(args):
     model = nn.DataParallel(model)
     model = model.cuda()
 
-    # saliency_model = bulid_saliency_model()
-    # saliency_model = nn.DataParallel(saliency_model)
-    # saliency_model = saliency_model.cuda()
-    # saliency_model.eval()
+    '''# build well-pretrained saliency detection model
+    saliency_model = bulid_saliency_model()
+    saliency_model = nn.DataParallel(saliency_model)
+    saliency_model = saliency_model.cuda()
+    for param, val in saliency_model.named_parameters():
+        val.requires_grad = False
+    saliency_model.eval()'''
 
     criterion = nn.CrossEntropyLoss().cuda()
 
@@ -53,7 +55,6 @@ def main(args):
             base_params.append(val)
 
     params = [{'params': base_params, 'lr_mult': 1}, {'params': new_params, 'lr_mult': 1}]
-    # params = [{'params': new_params, 'lr_mult': 1}]
     assert args.optim == 'adam' or args.optim == 'sgd', 'no such optimizer option'
     if args.optim == 'adam':
         optimizer = torch.optim.Adam(params, lr=args.lr, weight_decay=args.wd)
@@ -67,13 +68,15 @@ def main(args):
                                       mode='train',
                                       clip_len=32,
                                       transform=train_transforms,
-                                      modality='rgb'),
+                                      modality='rgb',
+                                      enhancement='normalize'),
                               batch_size=args.batch, shuffle=True, num_workers=args.workers)
     valid_loader = DataLoader(DarkVid('/home/lzf/HAR/data/',
                                       mode='validate',
                                       clip_len=32,
                                       transform=validation_transforms,
-                                      modality='rgb'),
+                                      modality='rgb',
+                                      enhancement='normalize'),
                               batch_size=args.val_batch, num_workers=args.workers)
 
     if args.writer:
@@ -152,6 +155,7 @@ def train(model, train_loader, criterion, optimizer, epoch, accumulation_steps=1
         slow = slow.cuda().float()
         fast = fast.cuda().float()
         target = target.cuda()
+
         inputs_var = [slow, fast]
         output = model(inputs_var)
         preds.append(output.detach())
@@ -185,6 +189,7 @@ def test(model, test_loader, criterion):
         slow = slow.cuda().float()
         fast = fast.cuda().float()
         target = target.cuda()
+
         inputs_var = [slow, fast]
         with torch.no_grad():
             output = model(inputs_var)
@@ -212,7 +217,7 @@ if __name__ == '__main__':
                         help='manual epoch number (useful on restarts)')
     parser.add_argument("--batch", type=int, default=16,
                         help="batch size")
-    parser.add_argument("--val-batch", type=int, default=32,
+    parser.add_argument("--val-batch", type=int, default=16,
                         help="batch size for validation set")
     parser.add_argument("--workers", type=int, default=6,
                         help="num_workers for DataLoader")
@@ -230,9 +235,9 @@ if __name__ == '__main__':
     # path
     parser.add_argument('--resume', default='', type=str, metavar='PATH',
                         help='path to latest checkpoint')
-    parser.add_argument('--writer', default='/home/lzf/HAR/log/log_slowfast', type=str,
+    parser.add_argument('--writer', default='', type=str,
                         help='path of SummaryWriter')
-    parser.add_argument('--checkpoint-path', default='/home/lzf/HAR/ckpts/slowfast/', type=str,
+    parser.add_argument('--checkpoint-path', default='', type=str,
                         help='path to save model')
     parser.add_argument('--pretrained', default='/home/lzf/HAR/models/SLOWFAST_8x8_R50.pth', type=str,
                         help='path of pretrained model')

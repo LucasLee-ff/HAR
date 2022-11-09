@@ -77,8 +77,10 @@ class Slowfast(nn.Module):
         self.backbone = pytorchvideo.models.create_slowfast(model_num_class=num_classes, input_channels=input_channels)
         self.new_layers = ['blocks.6.proj.weight', 'blocks.6.proj.bias']
         if input_channels != (3, 3):
-            self.new_layers = self.new_layers + ['blocks.0.multipathway_blocks.0.conv.weight',
-                                                 'blocks.0.multipathway_blocks.1.conv.weight']
+            if input_channels[0] != 3:
+                self.new_layers = self.new_layers + ['blocks.0.multipathway_blocks.0.conv.weight']
+            if input_channels[1] != 3:
+                self.new_layers = self.new_layers + ['blocks.0.multipathway_blocks.1.conv.weight']
 
     def forward(self, x):
         x = self.backbone(x)
